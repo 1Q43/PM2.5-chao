@@ -1,0 +1,62 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 23
+    buildToolsVersion '25.0.3'
+
+    defaultConfig {
+        applicationId "com.example.pm"
+        minSdkVersion 17
+        targetSdkVersion 23
+
+        // Enabling multidex support.
+        multiDexEnabled true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.txt'
+        }
+    }
+
+    packagingOptions {
+        exclude 'META-INF/DEPENDENCIES'
+        exclude 'META-INF/NOTICE'
+        exclude 'META-INF/LICENSE'
+
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['libs']
+        }
+    }
+
+    dexOptions {
+        preDexLibraries = false
+    }
+
+}
+
+repositories {
+    maven { url "https://jitpack.io" }
+}
+
+dependencies {
+    compile project(':slidingmenu_library')
+    // compile files('src/main/jniLibs/BaiduLBS_Android.jar')
+    // compile files('src/main/jniLibs/locSDK_6.03.jar')
+    compile project(':umeng_share_library')
+    compile files('libs/baidumapapi_v3_5_0.jar')
+    compile files('libs/locSDK_6.13.jar')
+    compile 'com.github.lecho:hellocharts-library:1.5.8@aar'
+    compile 'com.mcxiaoke.volley:library:1.0.18'
+    compile 'nl.qbusict:cupboard:2.1.2'
+    compile 'com.github.orhanobut:logger:1.12'
+    compile 'com.android.support:multidex:1.0.0'
+    compile 'com.android.support:appcompat-v7:23.4.0'
+    //compile 'com.android.support.constraint:constraint-layout:1.0.0-alpha8'
+    compile 'com.squareup.okhttp:okhttp:2.4.0'
+    compile 'com.squareup.okio:okio:1.5.0'
+}
