@@ -47,7 +47,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="最高温度:"/>
+                    android:text="最高温度(摄氏度):"/>
 
                 <TextView
                     android:layout_width="match_parent"
@@ -59,7 +59,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="最低温度:"/>
+                    android:text="最低温度(摄氏度):"/>
 
                 <TextView
                     android:layout_width="match_parent"
@@ -71,7 +71,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="PM2.5:"/>
+                    android:text="PM2.5(微克/立方米):"/>
 
                 <TextView
                     android:layout_width="match_parent"
@@ -83,7 +83,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="明日吸入PM25预测:"/>
+                    android:text="明日吸入PM25预测(微克):"/>
 
                 <TextView
                     android:layout_width="match_parent"

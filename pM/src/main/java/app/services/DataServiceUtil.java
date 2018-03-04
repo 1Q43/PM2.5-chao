@@ -1,10 +1,28 @@
 package app.services;
 
+import android.app.ActivityManager;
+import android.app.ActivityManager.RunningTaskInfo;
+import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Context;
+import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.location.Location;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.text.TextUtils;
 import android.util.Log;
+
+import com.squareup.okhttp.Call;
+import com.squareup.okhttp.MediaType;
+import com.squareup.okhttp.OkHttpClient;
+import com.squareup.okhttp.Request;
+import com.squareup.okhttp.RequestBody;
+import com.squareup.okhttp.Response;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -16,9 +34,12 @@ import java.math.BigDecimal;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import app.Entity.Forecast;
+import app.Entity.HeartRate;
 import app.Entity.State;
 import app.utils.ACache;
 import app.utils.Const;
@@ -27,6 +48,7 @@ import app.utils.DBHelper;
 import app.utils.FileUtil;
 import app.utils.ShortcutUtil;
 import app.utils.StableCache;
+import nl.qbusict.cupboard.QueryResultIterable;
 
 import static nl.qbusict.cupboard.CupboardFactory.cupboard;
 
@@ -67,6 +89,265 @@ public class DataServiceUtil {
     private String device_number = null;
 
     private int avg_rate = 12; //a stable holding of current hearth rate of cache.
+
+    private boolean upload = false;
+
+    private static int count = 0;
+    private static int averageheart = 0;
+    private static int sendJsonCount = 0;
+    private String jsonString = "";
+
+    public static final MediaType JSON= MediaType.parse("application/json; charset=utf-8");
+
+    public static int getCount() {
+        return count;
+    }
+
+    public static int getAverageheart() {
+        return averageheart;
+    }
+
+
+    public static void setCount(int count) {
+        DataServiceUtil.count = count;
+    }
+
+    public static void setAverageheart(int averagehearts) {
+        DataServiceUtil.averageheart = averagehearts;
+    }
+
+
+    public void setUpload(boolean upload) {
+        this.upload = upload;
+    }
+
+    public boolean getUpload() {
+        return upload;
+    }
+
+
+    public static boolean isWifi(Context context) {
+        ConnectivityManager cm = (ConnectivityManager) context
+                .getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo networkINfo = cm.getActiveNetworkInfo();
+        if (networkINfo != null
+                && networkINfo.getType() == ConnectivityManager.TYPE_WIFI) {
+            return true;
+        }
+        return false;
+    }
+
+    public boolean isWifiConnected(Context context) {
+        ConnectivityManager connectivity = (ConnectivityManager) context
+                .getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivity != null) {
+            NetworkInfo[] info = connectivity.getAllNetworkInfo();
+            if (info != null) {
+                for (int i = 0; i < info.length; i++) {
+                    if (info[i].getTypeName().equals("WIFI") && info[i].isConnected()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    public String getRunningActivityName(Context context) {
+
+        ActivityManager activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        String runningActivity = activityManager.getRunningTasks(1).get(0).topActivity
+                .getClassName();
+        return runningActivity;
+    }
+
+    public boolean isForeground(Context context, String className) {
+        if (context == null || TextUtils.isEmpty(className)) {
+            return false;
+        }
+
+        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        List<RunningTaskInfo> list = am.getRunningTasks(1);
+        if (list != null && list.size() > 0) {
+            ComponentName cpn = list.get(0).topActivity;
+            if (className.equals(cpn.getClassName())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    //批量上传数据到服务器
+    public String sendOkhttpPostJson(String heartRate) throws IOException {
+        SimpleDateFormat time_form = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        OkHttpClient mOkHttpClient = new OkHttpClient();
+        //创建一个Request
+        String url = "http://106.14.63.93:8080/post";
+
+        String json = "{\"data\":[" + heartRate + "]}";
+
+
+        Log.e("BandInfo-",json);
+
+        RequestBody requestBody = RequestBody.create(JSON, json);
+
+        Request request = new Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build();
+        try {
+            Response response = mOkHttpClient.newCall(request).execute();
+            if (response.isSuccessful()) {
+                Log.e("BandInfo-", response.body().string());
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    // 逐条上传数据到服务器
+    public String sendOkhttp(HeartRate heartRate) throws IOException {
+        SimpleDateFormat time_form = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        OkHttpClient mOkHttpClient = new OkHttpClient();
+        //创建一个Request
+        String url = "http://106.14.63.93:8080/post?";
+        String userid = String.valueOf(getUserIdFromCache());
+        String username = String.valueOf(instance.getUserNameFromCache());
+        String time = time_form.format(heartRate.getTime());
+        String beats = String.valueOf(heartRate.getHeartrate());
+
+        String params = "user_id=" + userid + "&" +
+                        "user_name=" + username + "&" +
+                        "time_point=" + time + "&" +
+                        "beats=" + beats;
+        final Request request = new Request.Builder()
+                .url(url + params)
+                .build();
+        //new call
+        Call call = mOkHttpClient.newCall(request);
+        Response reponse = call.execute();
+        if(reponse.isSuccessful()){
+            //updateHeartRateUpLoad(heartRate);
+        }
+        Log.e("BandInfo-",String.valueOf(reponse));
+        return null;
+    }
+    /**
+     * get the user's name from cache, if failed, return 0
+     * @return the user id
+     */
+    public String getUserNameFromCache(){
+        String usrIdStr = aCache.getAsString(Const.Cache_User_Name);
+        if(ShortcutUtil.isStringOK(usrIdStr)){
+            try{
+                return usrIdStr;
+            }catch (Exception e){
+                FileUtil.appendErrorToFile(TAG,"getUserIdFromCache parsing error"
+                        +" in/outdoor == "+usrIdStr);
+                return "null";
+            }
+        }else {
+            return "null";
+        }
+    }
+
+    // 将获取的心率数据插入到数据库
+    public void insertHeartRate(HeartRate heartrate){
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        cupboard().withDatabase(db).put(heartrate);
+    }
+
+    // 将集合转化为JSONArray对象
+
+    // Map heart
+    private static Map getMapHeartRate(HeartRate heartRate){
+
+        Map map = new HashMap();
+        map.put("user_id",heartRate.getId());
+        map.put("time_point",heartRate.getTime());
+        map.put("heart_rate", heartRate.getHeartrate());
+        map.put("user_name", heartRate.getUsername());
+
+        return map;
+    }
+
+    // 上传数据到服务器
+    public synchronized void uploadHeartRateToInternet(){
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        //HeartRate heartRate = cupboard().withDatabase(db).query(HeartRate.class).get();
+        Cursor heartcursor = cupboard().withDatabase(db).query(HeartRate.class).getCursor();
+        QueryResultIterable<HeartRate> itr = cupboard().withCursor(heartcursor).iterate(HeartRate.class);
+        try{
+            for(HeartRate heart:itr){
+                try {
+                    // 如果正在通过蓝牙获取心率数据，那么停止后台传输数据到服务器的工作
+                    if(getRunningActivityName(mContext).equals("app.bandmodule.MonitorDisplayActivity") || isWifi(mContext) == false){
+                        Log.e("BandInfo-","WifiState:" + isWifi(mContext));
+                        break;
+                    }else if(heart.getIsupload() == null || heart.getIsupload() == 0){
+                        setUpload(true);
+                        setCount(getCount()+1);
+                        setAverageheart(getAverageheart() + heart.getHeartrate());
+                        updateHeartRateUpLoad(heart);
+                        Log.e("BandInfo-", "------");
+                        if(getCount() == 1){
+                            Log.e("BandInfo-", "Running");
+                            setCount(0);
+                            heart.setHeartrate(getAverageheart() / 1);
+                            setAverageheart(0);
+                            //sendOkhttp(heart);
+                            jsonString += heart.toJsonString();
+                            sendJsonCount = sendJsonCount + 1;
+                            if(sendJsonCount == 10){
+                                sendJsonCount = 0;
+                                sendOkhttpPostJson(jsonString);
+                                jsonString = "";
+                            }else{
+                                jsonString += ",";
+                            }
+
+
+                        }
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }finally {
+            // close the cursor
+            setUpload(false);
+            itr.close();
+            heartcursor.close();
+        }
+    }
+    // 更新某条数据
+    public void updateHeartRateUpLoad(HeartRate heartrate){
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        db.beginTransaction();
+        try{
+            ContentValues values = new ContentValues();
+            values.put(DBConstants.DB_MetaData.HEARTRATE_ISUPLOAD, 1);
+            cupboard().withDatabase(db).update(HeartRate.class, values, "_id = ?", heartrate.getId() + "");
+            db.setTransactionSuccessful();
+        }finally {
+            db.endTransaction();
+        }
+
+    }
+    // 获取本地数据库的所有数据
+    public List<HeartRate> getAllHeartRate(){
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        List<HeartRate> heartrate = cupboard().withDatabase(db).query(HeartRate.class).list();
+        return heartrate;
+    }
+    // 删除本地数据库一周之前的数据
+    public void deleteWeekData(){
+        long currenttime = System.currentTimeMillis() - 1000*3600*24*7;
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        cupboard().withDatabase(db).delete(HeartRate.class, "time < ?", String.valueOf(currenttime));
+    }
+
 
     public static DataServiceUtil getInstance(Context context){
        if(instance == null){
@@ -227,21 +508,44 @@ public class DataServiceUtil {
 
         int outdoorTime = 0;
         int indoorTime = 0;
+        double outdoorVol = 0.0;
+        double indoorVol = 0.0;
 
         for (State state: states){
             if (Integer.valueOf(state.getUserid()) == getUserIdFromCache()){
                 // 计算在室外的时间
                 if (state.getOutdoor().equals("1")){
                     outdoorTime++;
+                    outdoorVol += Double.valueOf(state.getVentilation_volume());
                 }
                 // 计算在室内的时间
                 if (state.getOutdoor().equals("0")){
                     indoorTime++;
+                    indoorVol += Double.valueOf(state.getVentilation_volume());
                 }
             }
         }
+
+        indoorVol /= indoorTime;
+        outdoorVol /= outdoorTime;
+
+            // rebuild on 2017.10.29
+        if(outdoorTime == 0){
+            outdoorVol = 0.0;
+            outdoorTime = 0;
+            Log.e("tomorrow",":outdoorVol为---"+outdoorVol);
+        }
+        if(indoorTime == 0){
+            indoorVol = 0.0;
+            indoorTime = 0;;
+            Log.e("tomorrow",":indoorVol为---"+indoorVol);
+        }
         try{
-            Forecast forecast = new Forecast(nowTime, Long.valueOf(getUserIdFromCache()), states.get(states.size() - 1).getTime_point(), String.valueOf(outdoorTime), String.valueOf(indoorTime));
+            Log.e("tomorrow",":indoorTime为---"+indoorTime);
+            Log.e("tomorrow","outdoorTime为---"+outdoorTime);
+            Forecast forecast = new Forecast(nowTime, Long.valueOf(getUserIdFromCache()),
+                    states.get(states.size() - 1).getTime_point(), String.valueOf(outdoorTime),
+                    String.valueOf(indoorTime), String.valueOf(indoorVol), String.valueOf(outdoorVol));
             return forecast;
         }catch (Exception e){
             return null;
@@ -298,7 +602,6 @@ public class DataServiceUtil {
 
         if (forecasts.size() > 0)
             return false;
-
         return true;
     }
 
@@ -318,25 +621,50 @@ public class DataServiceUtil {
      * return tomorrow's PM25 value by last seven days
      * @return
      */
-    public int[] getTomorrowForecast(){
+    public double[] getTomorrowForecast(){
         SQLiteDatabase db = dbHelper.getReadableDatabase();
         List<Forecast> forecasts = new ArrayList<>();
         forecasts = cupboard().withDatabase(db).query(Forecast.class).list();
         int num = 0;
         if (forecasts.size() > 7){
-            forecasts = forecasts.subList(0, 6);
+            forecasts = forecasts.subList(0, 7);
             num = 7;
         }else{
             num = forecasts.size();
         }
-        int indoors = 0;
-        int outdoors = 0;
+
+        int indoorTime = 0;
+        int outdoorTime = 0;
+        double indoorVol = 0.0;
+        double outdoorVol = 0.0;
+        ArrayList<Double> rates = new ArrayList<>();
         for (Forecast forecast : forecasts){
-            indoors += Integer.valueOf(forecast.getIndoor());
-            outdoors += Integer.valueOf(forecast.getOutdoor());
+            indoorTime += Integer.valueOf(forecast.getIndoor());
+            outdoorTime += Integer.valueOf(forecast.getOutdoor());
+            indoorVol += Double.valueOf(forecast.getVentilationVolIndoor());
+            outdoorVol += Double.valueOf(forecast.getVentilationVolOutdoor());
+            rates.add(outdoorTime * 1.0 / (indoorTime + outdoorTime));
         }
 
-        return new int[]{indoors / num, outdoors / num};
+        double proptionn = 0.0;
+        for (int i = 0; i < forecasts.size(); i++){
+            proptionn += rates.get(i) * (Integer.valueOf(forecasts.get(i).getIndoor()) + Integer.valueOf(forecasts.get(i).getOutdoor())) * 1.0 / (indoorTime + outdoorTime);
+        }
+
+        //double outRes = 24 * 60 / 2 * proptionn * (outdoorVol / num);
+        //double inRes = 24 * 60 / 2 * (1 - proptionn) * (indoorVol / num);
+
+        // rebuild on 2017.11.01
+        double outRes = outdoorVol/num;
+        double inRes = indoorVol/num;
+        if (num == 0) {
+            return new double[]{0.0, 0.0};
+        }else {
+            if (Double.compare(outRes, 0.0 / 0.0) == 0) {
+                return new double[]{inRes, 0.0};
+            }
+            return new double[]{inRes, outRes};
+        }
     }
 
     /**
@@ -546,10 +874,7 @@ public class DataServiceUtil {
         aCache.put(Const.Cache_Has_Step_Counter,String.valueOf(has));
     }
 
-    /**
-     * get the user's id from cache, if failed, return 0
-     * @return the user id
-     */
+
     public int getUserIdFromCache(){
         String usrIdStr = aCache.getAsString(Const.Cache_User_Id);
         if(ShortcutUtil.isStringOK(usrIdStr)){

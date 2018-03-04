@@ -55,6 +55,9 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+
+import app.Entity.HeartRate;
+import app.services.DataServiceUtil;
 import app.utils.DBHelper;
 
 
@@ -94,6 +97,7 @@ public class MonitorDisplayActivity extends Activity {
     List<Integer> getisuploadlist = new LinkedList<Integer>();
     List<Long> gettimelist = new LinkedList<Long>();
     private long timecount_flag = 0;
+    private long timecountafter_flag = 0;
     private long time_instant = System.currentTimeMillis();
 
 
@@ -104,44 +108,12 @@ public class MonitorDisplayActivity extends Activity {
     String readid = "";
     int readheartrate = 0;
     Long readtime = null;
-    /*
-    public static final MediaType JSON
-            = MediaType.parse("application/json; charset=utf-8");
-    OkHttpClient client = new OkHttpClient();
 
-    String post(String url, String json) throws IOException {
-
-        RequestBody body = new FormEncodingBuilder()
-                .add("user_id", "116")
-                .add("user_name", "chao")
-                .add("time_point", "1111-11-11%2011:11:11")
-                .add("beats", "111")
-                .build();
-
-        Request request = new Request.Builder()
-                .url(url)
-                .post(body)
-                .build();
-
-        Response response = client.newCall(request).execute();
-        if (response.isSuccessful()) {
-            return response.body().string();
-        } else {
-            throw new IOException("Unexpected code " + response);
-        }
-    }
-
-    */
-
-    /*String post(String url, String json) throws IOException {
-        RequestBody body = RequestBody.create(JSON, json);
-        Request request = new Request.Builder()
-                .url(url)
-                .post(body)
-                .build();
-        Response response = client.newCall(request).execute();
-        return response.body().string();
-    }*/
+    // orm存储模式
+    private static boolean ORM = true;
+    private static DataServiceUtil dataServiceUtil = null;
+    private boolean time_flag = false;
+    private TextView mTransStatus;
 
     public String sendOkhttp(String url, String params,String id,String heartrate,Long time) throws IOException {
         OkHttpClient mOkHttpClient = new OkHttpClient();
@@ -154,19 +126,40 @@ public class MonitorDisplayActivity extends Activity {
         Response reponse = call.execute();
         if(reponse.isSuccessful()){
             if (db.isOpen() == false) {
-                db = dbHelper.getReadableDatabase();
+                db = dbHelper.getWritableDatabase();
             }
-            Cursor cursor = db.query("banddata",null,"_id=?",new String[]{id},null,null,null);
-            while (cursor.moveToNext()){
-                readid = cursor.getString(cursor.getColumnIndex("_id"));
-                readheartrate = cursor.getInt(cursor.getColumnIndex("heartrate"));
-                readtime = cursor.getLong(cursor.getColumnIndex("time"));
 
-                ContentValues contentValues = new ContentValues();
-                contentValues.put("isupload", 1);
-                db.update("banddata",contentValues,"_id=?",new String[]{String.valueOf(id)});
+            // 加入事务处理，保护数据库由于频繁访问而造成的崩溃问题
+            try{
+                db.beginTransaction();
+                Cursor cursor = null;
 
+                try{
+                    cursor = db.query("banddata",null,"_id=?",new String[]{id},null,null,null);
+                    Thread.sleep(10);
+                }catch (Exception e){
+                    e.printStackTrace();
+                }
+                if(cursor.getCount() != 0 || cursor == null){
+                    while (cursor.moveToNext()){
+                        readid = cursor.getString(cursor.getColumnIndex("_id"));
+                        readheartrate = cursor.getInt(cursor.getColumnIndex("heartrate"));
+                        readtime = cursor.getLong(cursor.getColumnIndex("time"));
+
+                        ContentValues contentValues = new ContentValues();
+                        contentValues.put("isupload", 1);
+                        db.update("banddata",contentValues,"_id=?",new String[]{String.valueOf(id)});
+
+                    }
+                }
+                db.setTransactionSuccessful();
+            }catch (Exception e){
+                e.printStackTrace();
+            }finally {
+                db.endTransaction();
             }
+
+
 
         }
         Log.e("BandInfo-",String.valueOf(reponse));
@@ -199,16 +192,28 @@ public class MonitorDisplayActivity extends Activity {
                     Toast.makeText(getApplicationContext(), "数据保存完毕", Toast.LENGTH_SHORT).show();
                     mSavedheart.setText(" " + tempsave);
                     SaveHeartRateButtonFlag = true;
+                    FindHeartRateButtonFlag = true;
+                    UploadHeartRateButtonFlag = true;
                 }
                 break;
                 case 1:{
                     Toast.makeText(getApplicationContext(), "数据查询完毕", Toast.LENGTH_SHORT).show();
                     mFindedheart.setText(" " + tempcount);
+                    SaveHeartRateButtonFlag = true;
                     FindHeartRateButtonFlag = true;
+                    UploadHeartRateButtonFlag = true;
                 }
                 break;
                 case 2:{
                     Toast.makeText(getApplicationContext(), "数据上传完毕", Toast.LENGTH_SHORT).show();
+                    SaveHeartRateButtonFlag = true;
+                    FindHeartRateButtonFlag = true;
+                    UploadHeartRateButtonFlag = true;
+                    /*DeleteButton.performClick();*/
+                }
+                break;
+                case 3:{
+                    Toast.makeText(getApplicationContext(), "本地一周前数据已删除", Toast.LENGTH_SHORT).show();
                     /*DeleteButton.performClick();*/
                 }
                 break;
@@ -220,8 +225,22 @@ public class MonitorDisplayActivity extends Activity {
     };
 
 
+    class DeleteThread extends  Thread{
+        public void run(){
+            if(ORM == false){
+                long time_flag = time_instant - 7*24*3600*1000;
+                db.delete("banddata","time < ?",new String[]{String.valueOf(time_flag)});
+            }else {
+                dataServiceUtil.deleteWeekData();
+            }
+            handler.sendEmptyMessage(3);
+        }
+    }
+
     class UploadThread extends Thread {
         public void run() {
+            SaveHeartRateButtonFlag = false;
+            FindHeartRateButtonFlag = false;
             UploadHeartRateButtonFlag = false;
             LinkedList<String> uploadid = new LinkedList<String>();
             LinkedList<Integer> uploadheartlist = new LinkedList<Integer>();
@@ -231,80 +250,94 @@ public class MonitorDisplayActivity extends Activity {
             SimpleDateFormat time_form = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
             Log.e("BandInfo-", "正在查询需要上传的数据");
 
-            if (db.isOpen() == false) {
-                db = dbHelper.getReadableDatabase();
-            }
-            Cursor cursor;
-            try {
-                cursor = db.query("banddata", null, null, null, null, null, null);
-                while (cursor.moveToNext()) {
-                    String _id = cursor.getString(cursor.getColumnIndex("_id"));
-                    int heartratenum = cursor.getInt(cursor.getColumnIndex("heartrate"));
-                    long timenum = cursor.getLong(cursor.getColumnIndex("time"));
-                    uploadid.add(_id);
-                    uploadheartlist.add(heartratenum);
-                    uploadtimelist.add(timenum);
+            if(ORM == false){
+                if (db.isOpen() == false) {
+                    db = dbHelper.getWritableDatabase();
                 }
-            } catch (Exception e) {
-
-            }
-            Log.e("BandInfo-", "banddata中的数据量为: " + uploadheartlist.size());
-            tempcount = uploadheartlist.size();
-            for (int numbers : uploadheartlist) {
-                Log.e("BandInfo-", " " + numbers);
-            }
-
-            try {
-                sleep(500);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-
-            String url = "http://106.14.63.93:8080/post?";
-            String id;
-            String beats;
-            String time_point;
-            String postbody;
-            // 开始数据上传
-            for (int i=0;i<uploadheartlist.size();i++) {
-                id = String.valueOf(uploadid.get(i));
-                beats = String.valueOf(uploadheartlist.get(i));
-                time_point = time_form.format(uploadtimelist.get(i));
-
-                postbody = "user_id=" + "116&"
-                        + "user_name=" + "chao&"
-                        + "time_point=" + time_point + "&"
-                        + "beats=" + beats;
+                Cursor cursor;
                 try {
-                    sendOkhttp(url, postbody, id, beats,uploadtimelist.get(i));
-                } catch (IOException e) {
+                    cursor = db.query("banddata", null, null, null, null, null, null);
+                    while (cursor.moveToNext()) {
+                        String _id = cursor.getString(cursor.getColumnIndex("_id"));
+                        int heartratenum = cursor.getInt(cursor.getColumnIndex("heartrate"));
+                        long timenum = cursor.getLong(cursor.getColumnIndex("time"));
+                        Log.e("BandInfo-","在正在查找的id为:"+_id);
+                        // 增加判断该条数据是否上传过的逻辑，如果上传过，不把数据加入上传列表
+                        if(cursor.getInt(cursor.getColumnIndex("isupload")) != 1){
+                            uploadid.add(_id);
+                            uploadheartlist.add(heartratenum);
+                            uploadtimelist.add(timenum);
+                        }
+                    }
+                } catch (Exception e) {
+
+                }
+                Log.e("BandInfo-", "banddata中的数据量为: " + uploadheartlist.size());
+                tempcount = uploadheartlist.size();
+                for (int numbers : uploadheartlist) {
+                    Log.e("BandInfo-", " " + numbers);
+                }
+
+                try {
+                    sleep(500);
+                } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
-                if(i%300==0){
+
+                String url = "http://106.14.63.93:8080/post?";
+                String id;
+                int username = dataServiceUtil.getUserIdFromCache();
+                String beats;
+                String time_point;
+                String postbody;
+                // 开始数据上传
+                for (int i=0;i<uploadheartlist.size();i++) {
+                    id = String.valueOf(uploadid.get(i));
+                    beats = String.valueOf(uploadheartlist.get(i));
+                    time_point = time_form.format(uploadtimelist.get(i));
+
+                    postbody = "user_id=" + "116&"
+                            + "user_name=" + "chao&"
+                            + "time_point=" + time_point + "&"
+                            + "beats=" + beats;
                     try {
-                        sleep(10);
-                    } catch (InterruptedException e) {
+                        sendOkhttp(url, postbody, id, beats,uploadtimelist.get(i));
+                    } catch (IOException e) {
                         e.printStackTrace();
                     }
+                    if(i%200==0){
+                        try {
+                            sleep(20);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    Log.e("BandInfo-", url + postbody);
                 }
-                Log.e("BandInfo-", url + postbody);
+            }else{
+                // 使用ORM之后的上传逻辑
+                dataServiceUtil.uploadHeartRateToInternet();
             }
+
             handler.sendEmptyMessage(2);
         }
     }
         class TaskThread extends Thread {
             public void run() {
                 SaveHeartRateButtonFlag = false;
+                FindHeartRateButtonFlag = false;
+                UploadHeartRateButtonFlag = false;
                 Log.e("BandInfo-", "正在保存数据");
 
-                if (db.isOpen() == false) {
-                    db = dbHelper.getReadableDatabase();
+                /*if (db.isOpen() == false) {
+                    db = dbHelper.getWritableDatabase();
                 }
 
                 ContentValues values = new ContentValues();
-                db.beginTransaction();
+                //db.beginTransaction();
                 List<Integer> tempheartlist = new LinkedList<Integer>();
                 List<Long> temptimelist = new LinkedList<Long>();
+                HeartRate heartrate = new HeartRate();
                 try {
                     tempheartlist = heartratelist;
                     temptimelist = timelist;
@@ -316,28 +349,41 @@ public class MonitorDisplayActivity extends Activity {
 
                     for (int i = 0; i < tempheartlist.size(); i++) {
                         //db.execSQL("insert into banddata(heartrate)values(heart)");
-                        values.put("heartrate", tempheartlist.get(i));
-                        values.put("time",temptimelist.get(i));
-
+                        if(ORM == false){
+                            values.put("heartrate", tempheartlist.get(i));
+                            values.put("time", temptimelist.get(i));
+                        }else{
+                            heartrate.setHeartrate(tempheartlist.get(i));
+                            heartrate.setTime(temptimelist.get(i));
+                        }
                         Log.e("Monitor", "保存:" + tempheartlist.get(i));
                         Log.e("Monitor", "保存:" + temptimelist.get(i));
 
+
+
                         // 如果插入数据失败，判断数据库banddata表出问题
                         try{
-                            db.insert("banddata", null, values);
+                            if(ORM == false){
+                                db.insert("banddata", null, values);
+                            }else{
+                                dataServiceUtil.insertHeartRate(heartrate);
+                                Log.e("BandInfo-","使用ORM存储");
+                            }
                         }catch (Exception e){
-                            db.execSQL("CREATE TABLE IF NOT EXISTS banddata(_id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                                    "username STRING," +
-                                    "heartrate INTEGER," +
-                                    "time LONG," +
-                                    "gps STRING," +
-                                    "isupload INTEGER," +
-                                    "isdelete INTEGER);");
+                            if(ORM == false){
+                                db.execSQL("CREATE TABLE IF NOT EXISTS banddata(_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                                        "username STRING," +
+                                        "heartrate INTEGER," +
+                                        "time LONG," +
+                                        "gps STRING," +
+                                        "isupload INTEGER," +
+                                        "isdelete INTEGER);");
+                            }
                         }
                     }
-                    db.setTransactionSuccessful();
+                    //db.setTransactionSuccessful();
                 } finally {
-                    db.endTransaction();
+                    //db.endTransaction();
                 }
 
                 Log.e("BandInfo-", "数据保存成功");
@@ -347,7 +393,7 @@ public class MonitorDisplayActivity extends Activity {
                     sleep(500);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
-                }
+                }*/
                 handler.sendEmptyMessage(0);
             };
 
@@ -355,47 +401,62 @@ public class MonitorDisplayActivity extends Activity {
 
         class SearchThread extends Thread {
             public void run() {
+                SaveHeartRateButtonFlag = false;
                 FindHeartRateButtonFlag = false;
+                UploadHeartRateButtonFlag = false;
                 getheartlist = new LinkedList<Integer>();
                 gettimelist = new LinkedList<Long>();
                 getisuploadlist = new LinkedList<Integer>();
                 Log.e("BandInfo-", "正在查询数据");
-
-                if (db.isOpen() == false) {
-                    db = dbHelper.getReadableDatabase();
-                }
-                Cursor cursor;
-                try{
-                    cursor = db.query("banddata", null, null, null, null, null, null);
-                    while (cursor.moveToNext()) {
-                        String _id = cursor.getString(cursor.getColumnIndex("_id"));
-                        int heartratenum = cursor.getInt(cursor.getColumnIndex("heartrate"));
-                        long timenum = cursor.getLong(cursor.getColumnIndex("time"));
-                        int isupload = cursor.getInt(cursor.getColumnIndex("isupload"));
-                        getheartlist.add(heartratenum);
-                        gettimelist.add(timenum);
-                        getisuploadlist.add(isupload);
+                if(ORM == false){
+                    if (db.isOpen() == false) {
+                        db = dbHelper.getWritableDatabase();
                     }
-                }catch (Exception e){
-                    db.execSQL("CREATE TABLE IF NOT EXISTS banddata(_id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                            "username STRING," +
-                            "heartrate INTEGER," +
-                            "time LONG," +
-                            "gps STRING," +
-                            "isupload INTEGER," +
-                            "isdelete INTEGER);");
+                    Cursor cursor = null;
+                    try{
+                        cursor = db.query("banddata", null, null, null, null, null, null);
+                        while (cursor.moveToNext()) {
+                            String _id = cursor.getString(cursor.getColumnIndex("_id"));
+                            int heartratenum = cursor.getInt(cursor.getColumnIndex("heartrate"));
+                            long timenum = cursor.getLong(cursor.getColumnIndex("time"));
+                            int isupload = cursor.getInt(cursor.getColumnIndex("isupload"));
+                            getheartlist.add(heartratenum);
+                            gettimelist.add(timenum);
+                            getisuploadlist.add(isupload);
+                        }
+                    }catch (Exception e){
+                        db.execSQL("CREATE TABLE IF NOT EXISTS banddata(_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                                "username STRING," +
+                                "heartrate INTEGER," +
+                                "time LONG," +
+                                "gps STRING," +
+                                "isupload INTEGER," +
+                                "isdelete INTEGER);");
+                    }finally {
+                        if(cursor != null){
+                            cursor.close();
+                        }
+                    }
+                    Log.e("BandInfo-", "banddata中的数据量为: " + getheartlist.size());
+                    tempcount = getheartlist.size();
+                    for (int numbers : getheartlist) {
+                        Log.e("BandInfo-", " " + numbers);
+                    }
+                    for (long times : gettimelist){
+                        Log.e("BandInfo-"," " + new Date(times));
+                    }
+                    for (int uploadflag : getisuploadlist){
+                        Log.e("BandInfo-"," " + uploadflag);
+                    }
+                }else{
+                    tempcount = dataServiceUtil.getAllHeartRate().size();
+                    Log.e("BandInfo-"," " + tempcount);
+                    for(HeartRate heartRate:dataServiceUtil.getAllHeartRate()){
+                        //Log.e("BandInfo-"," username: " + heartRate.getUsername() + "  isUpload: " + heartRate.getIsupload() + "  heartrate:" +heartRate.getHeartrate()+"  id:" +heartRate.getId());
+                    }
+
                 }
-                Log.e("BandInfo-", "banddata中的数据量为: " + getheartlist.size());
-                tempcount = getheartlist.size();
-                for (int numbers : getheartlist) {
-                    Log.e("BandInfo-", " " + numbers);
-                }
-                for (long times : gettimelist){
-                    Log.e("BandInfo-"," " + new Date(times));
-                }
-                for (int uploadflag : getisuploadlist){
-                    Log.e("BandInfo-"," " + uploadflag);
-                }
+
 
                 try {
                     sleep(500);
@@ -461,24 +522,32 @@ public class MonitorDisplayActivity extends Activity {
         DeleteButton = (Button) findViewById(R.id.clearalldata);
         UploadButton = (Button) findViewById(R.id.uploaddata);
 
+
+        mTransStatus = (TextView) findViewById(R.id.transport_status);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        dataServiceUtil =  DataServiceUtil.getInstance(getApplicationContext());
+
 
         // 创建数据库的操作对象
+        /*
         dbHelper = new DBHelper(getApplicationContext());
-        db = dbHelper.getReadableDatabase();
-        db.execSQL("CREATE TABLE IF NOT EXISTS banddata(_id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                "username STRING," +
-                "heartrate INTEGER," +
-                "time LONG," +
-                "gps STRING," +
-                "isupload INTEGER," +
-                "isdelete INTEGER);");
+        db = dbHelper.getWritableDatabase();
+        if(ORM == false){
+            db.execSQL("CREATE TABLE IF NOT EXISTS banddata(_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "username STRING," +
+                    "heartrate INTEGER," +
+                    "time LONG," +
+                    "gps STRING," +
+                    "isupload INTEGER," +
+                    "isdelete INTEGER);");
+        }
+        */
+
 
         DeleteButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                db.execSQL("DELETE FROM banddata");
-                Toast.makeText(getApplicationContext(), "本地数据库数据已经被全部清空", Toast.LENGTH_SHORT).show();
+                new DeleteThread().run();
             }
         });
 
@@ -567,6 +636,7 @@ public class MonitorDisplayActivity extends Activity {
         super.onResume();
         registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
 
+        dataServiceUtil =  DataServiceUtil.getInstance(getApplicationContext());
         // 在onResume为时间参考点设置新
         time_instant = System.currentTimeMillis();
         timecount_flag = 0;
@@ -591,9 +661,8 @@ public class MonitorDisplayActivity extends Activity {
 
 
         // 增加保存未手动保存的数据
-        BSave.performClick();
+        // BSave.performClick();
 
-        
         unbindService(mServiceConnection);
         mBluetoothLeService = null;
         super.onDestroy();
@@ -668,31 +737,71 @@ public class MonitorDisplayActivity extends Activity {
 
                 flag = intent.getIntExtra(BluetoothLeService.STORE_COUNT, 0);
                 if (flag > 0) {
-                    //Log.e("GongZu", "normal data");
+                    /*Log.e("GongZu", "normal data");
                     Log.e("Monitor", "normal data");
                     Log.e("Monitor", " " + flag);
                     Log.e("Monitor", " " + packet_num);
                     Log.e("Monitor", " " + timecount_flag);
-                    Log.e("Monitor", " " + time_instant);
+                    Log.e("Monitor", " " + time_instant);*/
                     updateInfo(intent.getStringExtra(BluetoothLeService.GPS_DATA), intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0));
 
                     packet_num += 1;
                     // 增加存储到数据库的逻辑
-                    timecount_flag = timecount_flag + 1000;
-                    heartratelist.add(intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0));
-                    timelist.add(time_instant - timecount_flag);
-                    if (flag == 1)
+                    HeartRate heartrate = new HeartRate();
+                    if(flag == 1){
+                        timecount_flag = timecount_flag + 1000;
+                        // 增加实时存储逻辑，如果实时存储出错，那么采用手动保存的方式
+
+                        try{
+                            heartrate.setUserid(dataServiceUtil.getUserIdFromCache());
+                            heartrate.setUsername(dataServiceUtil.getUserNameFromCache());
+                            heartrate.setHeartrate(intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0));
+                            heartrate.setTime(time_instant - timecount_flag);
+                            Log.e("BandInfo-", "用户ID:" + dataServiceUtil.getUserIdFromCache());
+                            Log.e("BandInfo-", "用户名:" + dataServiceUtil.getUserNameFromCache());
+                            dataServiceUtil.insertHeartRate(heartrate);
+                            //Log.e("BandInfo-", "使用ORM存储:存储数据 " + "心率:" + intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0) + " " + new Date(time_instant - timecount_flag));
+                        }catch (Exception e){
+                            e.printStackTrace();
+                            heartratelist.add(intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0));
+                            timelist.add(time_instant - timecount_flag);
+                        }
+                    }else if(flag == 2){
+                        timecountafter_flag = timecountafter_flag + 1000;
+                        try{
+                            heartrate.setUserid(dataServiceUtil.getUserIdFromCache());
+                            heartrate.setUsername(dataServiceUtil.getUserNameFromCache());
+                            heartrate.setHeartrate(intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0));
+                            heartrate.setTime(time_instant + timecountafter_flag);
+                            Log.e("BandInfo-", "用户ID:" + dataServiceUtil.getUserIdFromCache());
+                            Log.e("BandInfo-", "用户名:" + dataServiceUtil.getUserNameFromCache());
+                            dataServiceUtil.insertHeartRate(heartrate);
+                            //Log.e("BandInfo-", "使用ORM存储:实时数据 " + "心率:" + intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0) + " " + new Date(time_instant + timecountafter_flag));
+                        }catch (Exception e){
+                            e.printStackTrace();
+                            heartratelist.add(intent.getIntExtra(BluetoothLeService.HEART_RATE_DATA, 0));
+                            timelist.add(time_instant + timecountafter_flag);
+                        }
+                    }
+
+                    if (flag == 1){
                         mTestStatus.setText("第" + times_count + "次" + "，数据量：" + packet_num);
-                    Log.e("BandInfo", "在连续传输数据");
+
+                        mTransStatus.setText("传输模式:存储数据");
+                        //Log.e("BandInfo-","在传输存储的数据" + packet_num);
+                    }else if(flag == 2){
+                        mTestStatus.setText("第" + times_count + "次" + "，数据量：" + packet_num);
+
+                        mTransStatus.setText("传输模式:实时数据");
+                        //Log.e("BandInfo-", "在传输实时数据" + packet_num);
+                    }
 
                 } else {
-                    //Log.e("GongZu", "next time");
-                    Log.e("Monitor", "next time");
-                    Log.e("BandInfo", "进行实时数据传输");
+                    //Log.e("Monitor", "next time");
+                    //Log.e("BandInfo-", "进行实时数据传输");
                     times_count += 1;
                     packet_num = 0;
                     mTestStatus.setText("第" + times_count + "次" + "，数据量：" + packet_num);
-
                 }
             }
         }

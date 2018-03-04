@@ -21,14 +21,12 @@ import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.Request;
 import com.android.volley.Response;
 import com.android.volley.VolleyError;
-import com.android.volley.VolleyLog;
 import com.android.volley.toolbox.JsonObjectRequest;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.UnsupportedEncodingException;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -50,7 +48,6 @@ import app.utils.VolleyQueue;
 import app.utils.ACache;
 
 import com.example.pm.ForecastActivity;
-import com.example.pm.MainActivity;
 import com.example.pm.ProfileFragment;
 import com.example.pm.R;
 
@@ -126,11 +123,26 @@ public class BackgroundService extends BroadcastReceiver {
     private StableCache stableCache;
     private String currentWifiId;
 
+    public static boolean getMornningWarning() {
+        return MORNNING_WARNING;
+    }
 
+    public static void setMornningWarning(boolean mornningWarning) {
+        MORNNING_WARNING = mornningWarning;
+    }
 
-    //
-    final String mRequestBody = "www.baidu.com";
+    private volatile static boolean MORNNING_WARNING = true;
 
+    public static boolean getAfternoonWarning() {
+        return AFTERNOON_WARNING;
+    }
+
+    public static void setAfternoonWarning(boolean afternoonWarning) {
+        AFTERNOON_WARNING = afternoonWarning;
+    }
+
+    private volatile static boolean AFTERNOON_WARNING = true;
+    private State current_state = null;
     @Override
     public void onReceive(Context context, Intent intent) {
         mContext = context;
@@ -206,9 +218,7 @@ public class BackgroundService extends BroadcastReceiver {
         }
         if (isGoingToSearchPM || repeatingCycle % 101 == 0) {//101
             isSearchDensityFinished = false;
-            Log.e("chao","next line is searchPMResult()!");
             searchPMResult(String.valueOf(mLocation.getLongitude()), String.valueOf(mLocation.getLatitude()));
-            Log.e("chao","out the line of searchPMResult()!");
 //            Log.i("Back wifi currently:", currentWifiId.replaceAll("\"",""));
 //                    Log.i("wifi from cache:", stableCache.getAsString(Const.Cache_User_Wifi));
 //            Log.i("Back wifi status:", currentWifiId.replaceAll("\"","").equals(stableCache.getAsString(Const.Cache_User_Wifi))+"");
@@ -224,7 +234,6 @@ public class BackgroundService extends BroadcastReceiver {
 //                    Log.e("BackgroundService","Now using data from server 4");
 //                }
 //            }
-
             Date d2=new Date();
             String sdf2=sdf.format(d2);
             Log.e(s,sdf2+" ");
@@ -236,9 +245,15 @@ public class BackgroundService extends BroadcastReceiver {
             Date d3=new Date();
             String sdf3=sdf.format(d3);
             Log.e(s,sdf3+" ");
-            Log.e("chao","startInner 119");
-
             Toast.makeText(mContext, "上传", Toast.LENGTH_LONG).show();
+        }
+
+        // new method 1216
+        if( (current_state = dataServiceUtil.getCurrentState())!= null){
+            if(Double.parseDouble(current_state.getDensity()) > 100 && pmWarningTime()){
+                notifyUser(Double.parseDouble(current_state.getDensity()), "实时");
+            }
+            Log.e("tomorrow","从缓存获取的PM2.5为: " + Double.parseDouble(current_state.getDensity()));
         }
 
         onGetSteps();
@@ -246,7 +261,6 @@ public class BackgroundService extends BroadcastReceiver {
         saveValues();
         onFinished("saveValues");
         onFinished(repeatingCycle + "end");
-        Log.e("chao","startInner out");
     }
 
     /**
@@ -334,19 +348,14 @@ public class BackgroundService extends BroadcastReceiver {
      */
     private void searchPMResult(String longitude, String latitude) {
 
-        Log.e("chao", "enter searchPMResult!");
-
         String url = HttpUtil.Search_PM_url;
         String token = dataServiceUtil.getTokenFromCache();
         url = url + "?longitude=" + longitude + "&latitude=" + latitude + "&access_token=" + token;
         FileUtil.appendStrToFile(repeatingCycle, "searchPMResult " + url);
-
-
         JsonObjectRequest jsonObjectRequest = new JsonObjectRequest(Request.Method.GET, url, new Response.Listener<JSONObject>() {
 
             @Override
             public void onResponse(JSONObject response) {
-
                 try {
                     Log.e("Back_search",response.toString());
                     int token_status = response.getInt("token_status");
@@ -358,24 +367,15 @@ public class BackgroundService extends BroadcastReceiver {
                             NotifyServiceUtil.notifyDensityChanged(mContext, pmModel.getPm25());
                             double PM25Density = Double.valueOf(pmModel.getPm25());
                             int PM25Source = pmModel.getSource();
-                            try{
-                                aCache.put(Const.Cache_Data_Source,String.valueOf(PM25Source));
-                                Log.e("chao","end try");
-                            }catch (Exception e){
-                                Log.e("chao","enter catch");
-                            }finally{
-                                Log.e("chao","enter finally");
-                            }
+//                            aCache.put(Const.Cache_Data_Source,String.valueOf(PM25Source));
 
                             dataServiceUtil.cacheIsSearchDensity(false);
                             dataServiceUtil.cachePMResult(PM25Density, PM25Source);
                             dataServiceUtil.cacheSearchPMFailed(0);
+
                             FileUtil.appendStrToFile(TAG, "searchPMResult success, density: " + PM25Density);
-
-
                         } else {
                             FileUtil.appendErrorToFile(TAG, "searchPMResult failed, status != 1");
-
                         }
                     }else if (token_status == 2){
                         checkPMDataForUpload();
@@ -394,77 +394,6 @@ public class BackgroundService extends BroadcastReceiver {
                 }
                 isSearchDensityFinished = true;
                 onFinished("searchPMResult success");
-
-            }
-                /*Log.e("chao"," 2"+"Get PM25 Failed!");
-                Toast.makeText(mContext, "volleyGetJsonMonth请求成功:" + jsonObject, Toast.LENGTH_SHORT).show();
-                }*/
-            }, new Response.ErrorListener() {
-            @Override
-
-            public void onErrorResponse(VolleyError error) {
-                isSearchDensityFinished = true;
-                onFinished("searchPMResult error");
-                dataServiceUtil.cacheSearchPMFailed(dataServiceUtil.getSearchFailedCountFromCache()+1);
-                FileUtil.appendErrorToFile(TAG,"searchPMResult failed msg: " + error.getMessage());
-            }
-
-            /*public void onErrorResponse(VolleyError volleyError) {
-                Log.e("chao"," 2 "+"Get PM25 Failed!");
-            }*/
-            });
-            /*@Override
-            public void onResponse(JSONObject response) {
-                try {
-                    Log.e("Back_search",response.toString());
-
-                    Log.e("chao","inner the onResponse()!");
-
-                    int token_status = response.getInt("token_status");
-                    if (token_status != 2) {
-                        int status = response.getInt("status");
-                        if (status == 1) {
-                            Const.IS_USE_805 = false;
-                            PMModel pmModel = PMModel.parse(response.getJSONObject("data"));
-                            NotifyServiceUtil.notifyDensityChanged(mContext, pmModel.getPm25());
-                            double PM25Density = Double.valueOf(pmModel.getPm25());
-                            int PM25Source = pmModel.getSource();
-                            aCache.put(Const.Cache_Data_Source,String.valueOf(PM25Source));
-
-                            dataServiceUtil.cacheIsSearchDensity(false);
-                            dataServiceUtil.cachePMResult(PM25Density, PM25Source);
-                            dataServiceUtil.cacheSearchPMFailed(0);
-
-                            FileUtil.appendStrToFile(TAG, "searchPMResult success, density: " + PM25Density);
-
-                            // Get log information
-                            Log.e("chao"," "+PM25Density);
-                        } else {
-                            FileUtil.appendErrorToFile(TAG, "searchPMResult failed, status != 1");
-                            //
-                            Log.e("chao"," 2"+"Get PM25 Failed!");
-                        }
-                    }else if (token_status == 2){
-                        checkPMDataForUpload();
-                        aCache.remove(Const.Cache_User_Id);
-                        aCache.remove(Const.Cache_Access_Token);
-                        aCache.remove(Const.Cache_User_Name);
-                        aCache.remove(Const.Cache_User_Nickname);
-                        aCache.remove(Const.Cache_User_Gender);
-                        Activity mActivity = (Activity)mContext;
-                        Intent intent = new Intent(mActivity, ForegroundService.class);
-                        mActivity.stopService(intent);
-                        Log.e("chao"," 2"+"Get token_status == 2!");
-                    }
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                    FileUtil.appendErrorToFile(TAG, "searchPMResult JSON error");
-                    //
-                    Log.e("chao", " 2"+"searchPMResult JSON error!");
-                }
-                isSearchDensityFinished = true;
-                onFinished("searchPMResult success");
-                Log.e("chao"," 2"+"searchPMResult success!");
             }
         }, new Response.ErrorListener() {
             @Override
@@ -473,11 +402,9 @@ public class BackgroundService extends BroadcastReceiver {
                 onFinished("searchPMResult error");
                 dataServiceUtil.cacheSearchPMFailed(dataServiceUtil.getSearchFailedCountFromCache()+1);
                 FileUtil.appendErrorToFile(TAG,"searchPMResult failed msg: " + error.getMessage());
-                Log.e("chao"," 2"+"searchPMResult error!");
             }
 
-        });*/
-        //Log.e("chao","Json failed!");
+        });
         VolleyQueue.getInstance(mContext.getApplicationContext()).addToRequestQueue(jsonObjectRequest);
     }
 
@@ -494,7 +421,7 @@ public class BackgroundService extends BroadcastReceiver {
         Const.Device_Number = devId;
         Const.IS_USE_805 = true;
         aCache.put(Const.Device_Id,devId);
-        aCache.put(Const.Cache_Data_Source,"3");
+        aCache.put(Const.Cache_Data_Source, "3");
         JsonObjectRequest jsonObjectRequest = new JsonObjectRequest(Request.Method.GET, url, new Response.Listener<JSONObject>() {
 
             @Override
@@ -513,18 +440,14 @@ public class BackgroundService extends BroadcastReceiver {
                             int PM25Source = 0;
                             dataServiceUtil.cachePMResult(PM25Density, PM25Source);
                             dataServiceUtil.cacheSearchPMFailed(0);
-                            Log.i("response from ilab:",PM25Density+", "+time);
+                            Log.i("response from ilab:", PM25Density+", "+time);
                             FileUtil.appendStrToFile(TAG, "searchPMResult success, density == " +
                                     PM25Density);
-                            //
-                            Log.e("chao"," 1"+"searchPMResult JSON error!");
                         } else {
                             Toast.makeText(getApplicationContext(), "ilab服务器数据过期", Toast.LENGTH_SHORT).show();
                             searchPMResult(String.valueOf(dataServiceUtil.getLongitudeFromCache()),
                                     String.valueOf(dataServiceUtil.getLatitudeFromCache()));
                             Log.e("ForeGroundService","ilab服务器数据过期");
-                            //
-                            Log.e("chao"," 1"+"ForeGroundService ilab服务器数据过期!");
                         }
 
                     } else {
@@ -535,7 +458,6 @@ public class BackgroundService extends BroadcastReceiver {
                         searchPMResult(String.valueOf(dataServiceUtil.getLongitudeFromCache()),
                                 String.valueOf(dataServiceUtil.getLatitudeFromCache()));
                         Log.e("ForeGroundService","设备号有误");
-
                     }
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -544,9 +466,6 @@ public class BackgroundService extends BroadcastReceiver {
                     Log.e("ForeGroundService","searchPMResult failed, JSON parsing error");
                     searchPMResult(String.valueOf(dataServiceUtil.getLongitudeFromCache()),
                             String.valueOf(dataServiceUtil.getLatitudeFromCache()));
-                    //
-                    Log.e("chao"," 1"+"ForeGroundService searchPMResult failed, JSON parsing error!");
-
                 } catch (ParseException e) {
                     e.printStackTrace();
                 }
@@ -562,8 +481,6 @@ public class BackgroundService extends BroadcastReceiver {
                 Log.e("ForeGroundService","ilab服务器请求出错");
                 searchPMResult(String.valueOf(dataServiceUtil.getLongitudeFromCache()),
                         String.valueOf(dataServiceUtil.getLatitudeFromCache()));
-                //
-                Log.e("chao"," 1"+"ForeGroundService ilab服务器请求出错!");
             }
         });
 
@@ -583,7 +500,7 @@ public class BackgroundService extends BroadcastReceiver {
         State last = state;
         state = dataServiceUtil.calculatePM25(mLocation.getLongitude(), mLocation.getLatitude(),stepNum);
 //        Log.v("Crysa_location","saveValues()lati"+mLocation.getLatitude()+"||"+"longi"+ mLocation.getLongitude());
-        Log.e("Back","save state");
+        Log.e("Back", "save state");
         state.print();
         State now = state;
 
@@ -614,8 +531,9 @@ public class BackgroundService extends BroadcastReceiver {
         Date date = new Date();
         Long now = date.getTime();
 
-        if (now - sevenClock >= 0){
-
+        if (now - sevenClock >= 0){// new method 1216
+            setMornningWarning(true);
+            setAfternoonWarning(true);
             if (dataServiceUtil.getLastForecast()){
                 pmWarningDetecter();
                 dataServiceUtil.insertForecast(dataServiceUtil.calculateOutAndInTime(states));
@@ -805,6 +723,68 @@ public class BackgroundService extends BroadcastReceiver {
         }
     }
 
+    /*
+    * 重写notifyUser方法，加入提示预测PM2.5值
+    */
+    public void notifyUser(double valueOfPM25,String title){
+
+        try {
+            NotificationManager mNotifyMgr = (NotificationManager) mContext.getSystemService(NOTIFICATION_SERVICE);
+            PendingIntent contentIntent = PendingIntent.getActivity(mContext, 0, new Intent(mContext, ForecastActivity.class), 0);
+
+            Notification notification = new Notification.Builder(mContext)
+                    .setSmallIcon(R.drawable.icon)
+                    .setContentTitle("PM2.5警报")
+                    .setContentText(title+"PM2.5为:"+valueOfPM25+"(微克/立方米)")
+                    .setTicker("PM2.5爆表了")
+                    .setDefaults(Notification.DEFAULT_VIBRATE)
+                    .setDefaults(Notification.DEFAULT_SOUND)
+                    .setAutoCancel(true)
+                    .setContentIntent(contentIntent)
+                    .build();
+            mNotifyMgr.notify(1, notification);
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+    }
+
+    public double getPMDensityFromCache(){
+        String tmp = aCache.getAsString(Const.Cache_PM_Density);
+        if(ShortcutUtil.isStringOK(tmp)){
+            try {
+                return Double.valueOf(aCache.getAsString(Const.Cache_PM_Density));
+            } catch (Exception e) {
+                return 0.0;
+            }
+        }else {
+        }
+        return 0.0;
+    }
+
+    private boolean pmWarningTime(){
+        Calendar calendar = Calendar.getInstance();
+        int year = calendar.get(Calendar.YEAR);
+        int month = calendar.get(Calendar.MONTH);
+        int day = calendar.get(Calendar.DAY_OF_MONTH);
+        calendar.set(year, month, day, 7, 0, 0);
+        Long sevenClock = calendar.getTime().getTime();
+        calendar.set(year, month, day, 12, 0, 0);
+        Long twelveClock = calendar.getTime().getTime();
+        calendar.set(year, month, day, 19, 0, 0);//17
+        Long fiveteenClock = calendar.getTime().getTime();
+        Date date = new Date();
+        Long now = date.getTime();
+        if(now - sevenClock >= 0 && now - twelveClock <= 0 && getMornningWarning()){
+            setMornningWarning(false);
+            return true;
+        }
+        if(now - twelveClock >= 0 && now - fiveteenClock <= 0 && getAfternoonWarning()){
+            setAfternoonWarning(false);
+            return true;
+        }
+        return false;
+    }
+
     public void pmWarningDetecter(){
         String url = HttpUtil.Predict_url + dataServiceUtil.getCityNameFromCache();
         url = url.substring(0, url.length() - 1);
@@ -817,7 +797,7 @@ public class BackgroundService extends BroadcastReceiver {
                     String pm25 = response.getString("PM25");
                     int pmVal =  Integer.valueOf(pm25);
 
-                    if (pmVal > 100){
+                    if (pmVal > 100){// change from 100 to 10
                         notifyUser();
                     }
                 } catch (JSONException e) {

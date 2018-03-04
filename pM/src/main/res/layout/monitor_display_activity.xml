@@ -113,6 +113,16 @@
         android:text="第1次，数据量 :0"
         android:textSize="18sp" />
 
+    <TextView
+        android:id="@+id/transport_status"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="10dp"
+        android:layout_marginRight="10dp"
+        android:layout_marginTop="10dp"
+        android:text="传输模式:"
+        android:textSize="18sp" />
+
     <Button
         android:id="@+id/button"
         android:layout_gravity="center_horizontal"
@@ -125,8 +135,9 @@
     <!-- End -->
 
     <LinearLayout
+        android:visibility="invisible"
         android:layout_width="fill_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
         android:layout_marginLeft="10dp"
         android:layout_marginRight="10dp"
         android:layout_marginTop="10dp"
@@ -148,10 +159,11 @@
             android:textSize="18sp" />
     </LinearLayout>
     <Button
+        android:visibility="invisible"
         android:id="@+id/savedata"
         android:layout_gravity="center_horizontal"
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
         android:layout_marginLeft="10dp"
         android:layout_marginRight="10dp"
         android:layout_marginTop="5dp"
@@ -192,7 +204,7 @@
 
     <Button
         android:id="@+id/clearalldata"
-        android:text="清空本地数据库数据"
+        android:text="清空本地一周前数据"
         android:layout_marginTop="5dp"
         android:layout_gravity="center_horizontal"
         android:layout_width="wrap_content"

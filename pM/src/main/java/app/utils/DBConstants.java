@@ -36,6 +36,22 @@ public class DBConstants {
         public static final String FORECAST_DATE = "date";
         public static final String FORECAST_OUTDOOR_TIME = "outdoor";
         public static final String FORECAST_INDOOR_TIME = "indoor";
+        public static final String FORECAST_VENTILATION_VOL_INDOOR = "ventilation_vol_indoor";
+        public static final String FORECAST_VENTILATION_VOL_OUTDOOR = "ventilation_vol_outdoor";
+
+        /**
+         * @author Hong Jiayong
+         * For heart rates
+         */
+        public static final String HEARTRATE_ID = "_id";
+        public static final String HEARTRATE_USERID = "userid";
+        public static final String HEARTRATE_USERNAME = "username";
+        public static final String HEARTRATE_HEARTRATE = "heartrate";
+        public static final String HEARTRATE_TIME = "time";
+        public static final String HEARTRATE_GPS = "gps";
+        public static final String HEARTRATE_ISUPLOAD = "isupload";
+        public static final String HEARTRATE_ISDELETE = "isdelete";
+
     }
 
 }
